@@ -136,31 +136,6 @@ export function Tree({ tree, index }: TreeProps) {
         }}
       />
 
-      {/* Progress bar */}
-      {tree.harvestProgress > 0 && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: '-10px',
-            left: '0',
-            width: '100%',
-            height: '4px',
-            backgroundColor: '#333',
-            borderRadius: '2px',
-            overflow: 'hidden',
-          }}
-        >
-          <div
-            style={{
-              width: `${tree.harvestProgress * 100}%`,
-              height: '100%',
-              backgroundColor: '#4CAF50',
-              transition: 'width 0.1s linear',
-            }}
-          />
-        </div>
-      )}
-
       {/* Wood amount */}
       <div
         style={{
@@ -173,6 +148,7 @@ export function Tree({ tree, index }: TreeProps) {
           padding: '2px 6px',
           borderRadius: '10px',
           fontSize: '12px',
+          zIndex: 3,
         }}
       >
         {tree.woodAmount}

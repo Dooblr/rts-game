@@ -6,6 +6,11 @@ export const DEPOSIT_RANGE = 50;
 export const WORKER_RADIUS = 20;
 export const WORKER_COLLISION_RADIUS = WORKER_RADIUS * 2;
 
+// Worker positioning around resources
+export const MIN_HARVEST_RANGE = HARVEST_RANGE - 5;
+export const MAX_HARVEST_RANGE = HARVEST_RANGE - 2;
+export const HARVEST_ANGLE_SPACING = Math.PI / 4; // 45 degrees between workers
+
 // Speeds and timings
 export const MOVEMENT_DURATION = 500; // ms
 export const HARVEST_SPEED = 0.1; // Progress per tick

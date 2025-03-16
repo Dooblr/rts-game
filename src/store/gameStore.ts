@@ -10,6 +10,9 @@ import {
   RETURN_TO_HARVEST_DELAY,
   INITIAL_TREE_WOOD,
   INITIAL_HOME_WOOD,
+  MIN_HARVEST_RANGE,
+  MAX_HARVEST_RANGE,
+  HARVEST_ANGLE_SPACING,
 } from '../constants';
 
 export interface Position {
@@ -129,6 +132,62 @@ function findValidPosition(
   }
 
   return { x: targetX, y: targetY };
+}
+
+// Helper function to find the best harvesting position around a tree
+function findHarvestPosition(
+  workerId: string,
+  tree: Tree,
+  workers: Worker[],
+  currentWorkerPos: Position
+): Position {
+  const harvestingWorkers = workers.filter(w => 
+    w.id !== workerId && 
+    w.isHarvesting && 
+    w.lastHarvestedTreeId === 0
+  );
+
+  // If no other workers are harvesting, use the closest point
+  if (harvestingWorkers.length === 0) {
+    const angle = Math.atan2(
+      tree.position.y - currentWorkerPos.y,
+      tree.position.x - currentWorkerPos.x
+    );
+    return {
+      x: tree.position.x - Math.cos(angle) * MIN_HARVEST_RANGE,
+      y: tree.position.y - Math.sin(angle) * MIN_HARVEST_RANGE
+    };
+  }
+
+  // Find all taken angles
+  const takenAngles = harvestingWorkers.map(w => 
+    Math.atan2(w.position.y - tree.position.y, w.position.x - tree.position.x)
+  );
+
+  // Normalize angles to 0-2π
+  const normalizedTakenAngles = takenAngles.map(angle => 
+    angle < 0 ? angle + 2 * Math.PI : angle
+  ).sort((a, b) => a - b);
+
+  // Find the largest gap between taken angles
+  let largestGap = normalizedTakenAngles[0] + (2 * Math.PI - normalizedTakenAngles[normalizedTakenAngles.length - 1]);
+  let bestAngle = (normalizedTakenAngles[0] + normalizedTakenAngles[normalizedTakenAngles.length - 1]) / 2;
+
+  for (let i = 1; i < normalizedTakenAngles.length; i++) {
+    const gap = normalizedTakenAngles[i] - normalizedTakenAngles[i - 1];
+    if (gap > largestGap) {
+      largestGap = gap;
+      bestAngle = normalizedTakenAngles[i - 1] + gap / 2;
+    }
+  }
+
+  // Use a random distance between MIN and MAX harvest range
+  const distance = MIN_HARVEST_RANGE + Math.random() * (MAX_HARVEST_RANGE - MIN_HARVEST_RANGE);
+
+  return {
+    x: tree.position.x + Math.cos(bestAngle) * distance,
+    y: tree.position.y + Math.sin(bestAngle) * distance
+  };
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -254,7 +313,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       const targetX = home.position.x - Math.cos(angle) * (DEPOSIT_RANGE - 5);
       const targetY = home.position.y - Math.sin(angle) * (DEPOSIT_RANGE - 5);
       
-      // Find valid position near home that doesn't collide
       const validPosition = findValidPosition(
         workerId,
         targetX,
@@ -283,15 +341,14 @@ export const useGameStore = create<GameState>((set, get) => ({
         ),
       }));
     } else if (distance > HARVEST_RANGE) {
-      const angle = Math.atan2(tree.position.y - worker.position.y, tree.position.x - worker.position.x);
-      const targetX = tree.position.x - Math.cos(angle) * (HARVEST_RANGE - 5);
-      const targetY = tree.position.y - Math.sin(angle) * (HARVEST_RANGE - 5);
+      // Find optimal harvesting position
+      const harvestPos = findHarvestPosition(workerId, tree, state.workers, worker.position);
       
-      // Find valid position near tree that doesn't collide
+      // Find valid position that doesn't collide with other workers
       const validPosition = findValidPosition(
         workerId,
-        targetX,
-        targetY,
+        harvestPos.x,
+        harvestPos.y,
         state.workers,
         worker.position.x,
         worker.position.y

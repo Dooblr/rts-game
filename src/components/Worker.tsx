@@ -1,18 +1,43 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Worker as WorkerType } from '../store/gameStore';
 import { useGameStore } from '../store/gameStore';
 import {
   WORKER_RADIUS,
   MOVEMENT_DURATION,
+  MAX_WOOD_CAPACITY,
+  HARVEST_RANGE,
 } from '../constants';
+
+const HARVEST_RATE = 1000; // 1 second per wood unit
 
 interface WorkerProps {
   worker: WorkerType;
 }
 
 export function Worker({ worker }: WorkerProps) {
-  const { selectEntity, updateWorkerPosition, depositWood, startHarvesting } = useGameStore();
+  const { selectEntity, updateWorkerPosition, depositWood, startHarvesting, updateHarvestProgress } = useGameStore();
   const workerRef = useRef<HTMLDivElement>(null);
+  const shouldReturnToTree = useRef(false);
+  const [progress, setProgress] = useState(0);
+  const progressStartTime = useRef<number | null>(null);
+  const animationFrameRef = useRef<number>();
+
+  // Check if worker is in range of a tree and should start harvesting
+  useEffect(() => {
+    if (worker.isMoving || worker.isHarvesting || worker.woodCarried >= MAX_WOOD_CAPACITY) return;
+
+    const gameStore = useGameStore.getState();
+    const nearestTree = gameStore.trees.find(tree => {
+      const dx = tree.position.x - worker.position.x;
+      const dy = tree.position.y - worker.position.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      return distance <= HARVEST_RANGE;
+    });
+
+    if (nearestTree) {
+      startHarvesting(worker.id);
+    }
+  }, [worker.position, worker.id, worker.isMoving, worker.isHarvesting, worker.woodCarried, startHarvesting]);
 
   // Handle worker movement animation
   useEffect(() => {
@@ -38,14 +63,13 @@ export function Worker({ worker }: WorkerProps) {
       if (progress < 1) {
         requestAnimationFrame(animate);
       } else {
-        // Update the final position in the store
         updateWorkerPosition(worker.id, { x: targetX, y: targetY });
         
-        // If we were moving to deposit wood, try depositing
         if (worker.woodCarried > 0) {
+          shouldReturnToTree.current = true;
           depositWood(worker.id);
-        } else if (worker.lastHarvestedTreeId !== null) {
-          // If we just deposited and have a tree to return to, start harvesting
+        } else if (shouldReturnToTree.current && worker.lastHarvestedTreeId !== null) {
+          shouldReturnToTree.current = false;
           startHarvesting(worker.id);
         }
       }
@@ -54,16 +78,62 @@ export function Worker({ worker }: WorkerProps) {
     requestAnimationFrame(animate);
   }, [worker.isMoving, worker.targetPosition, worker.position, worker.id, updateWorkerPosition, worker.woodCarried, depositWood, worker.lastHarvestedTreeId, startHarvesting]);
 
-  // Handle harvesting progress updates
+  // Handle harvesting progress animation
   useEffect(() => {
-    if (!worker.isHarvesting) return;
+    if (!worker.isHarvesting || worker.lastHarvestedTreeId === null) {
+      setProgress(0);
+      progressStartTime.current = null;
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      return;
+    }
 
-    const interval = setInterval(() => {
-      useGameStore.getState().updateHarvestProgress(worker.id, 0);
-    }, 1000);
+    function animateProgress(timestamp: number) {
+      if (!progressStartTime.current) {
+        progressStartTime.current = timestamp;
+      }
 
-    return () => clearInterval(interval);
-  }, [worker.isHarvesting, worker.id]);
+      const elapsed = timestamp - progressStartTime.current;
+      const currentProgress = (elapsed % HARVEST_RATE) / HARVEST_RATE;
+      const completedCycles = Math.floor(elapsed / HARVEST_RATE);
+
+      // Check if we've completed a cycle
+      if (completedCycles > 0) {
+        progressStartTime.current = timestamp;
+        if (worker.woodCarried < MAX_WOOD_CAPACITY) {
+          updateHarvestProgress(worker.id, worker.lastHarvestedTreeId);
+        }
+      }
+
+      setProgress(currentProgress);
+      animationFrameRef.current = requestAnimationFrame(animateProgress);
+    }
+
+    animationFrameRef.current = requestAnimationFrame(animateProgress);
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [worker.isHarvesting, worker.woodCarried, worker.id, worker.lastHarvestedTreeId, updateHarvestProgress]);
+
+  // Handle auto-return to home when full
+  useEffect(() => {
+    if (!worker.isHarvesting || worker.isMoving) return;
+
+    if (worker.woodCarried >= MAX_WOOD_CAPACITY) {
+      const gameStore = useGameStore.getState();
+      const home = gameStore.home;
+      if (home) {
+        gameStore.moveWorker(worker.id, home.position);
+      }
+    }
+  }, [worker.isHarvesting, worker.isMoving, worker.id, worker.woodCarried]);
+
+  const size = WORKER_RADIUS * 2;
+  const circumference = 2 * Math.PI * (size / 2 + 2);
 
   return (
     <div
@@ -73,8 +143,8 @@ export function Worker({ worker }: WorkerProps) {
         position: 'absolute',
         left: `${worker.position.x}px`,
         top: `${worker.position.y}px`,
-        width: WORKER_RADIUS * 2,
-        height: WORKER_RADIUS * 2,
+        width: size,
+        height: size,
         marginLeft: `-${WORKER_RADIUS}px`,
         marginTop: `-${WORKER_RADIUS}px`,
         borderRadius: '50%',
@@ -101,24 +171,32 @@ export function Worker({ worker }: WorkerProps) {
         }
       }}
     >
-      {/* Wood carried indicator */}
-      {worker.woodCarried > 0 && (
-        <div
+      {/* Circular Progress Indicator */}
+      {worker.isHarvesting && (
+        <svg
           style={{
             position: 'absolute',
-            top: '-20px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            backgroundColor: '#8B4513',
-            color: 'white',
-            padding: '2px 6px',
-            borderRadius: '10px',
-            fontSize: '12px',
-            zIndex: 3,
+            top: -4,
+            left: -4,
+            width: size + 8,
+            height: size + 8,
+            transform: 'rotate(-90deg)',
+            zIndex: 2,
           }}
         >
-          {worker.woodCarried}
-        </div>
+          <circle
+            cx={(size + 8) / 2}
+            cy={(size + 8) / 2}
+            r={size / 2 + 2}
+            fill="none"
+            stroke="#4CAF50"
+            strokeWidth="2"
+            strokeDasharray={`${progress * circumference} ${circumference}`}
+            style={{
+              transition: 'stroke-dasharray 0.1s linear',
+            }}
+          />
+        </svg>
       )}
     </div>
   );
